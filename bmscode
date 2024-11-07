@@ -1,0 +1,408 @@
+-- Create Customers Table
+CREATE TABLE Customers (
+    Customer_ID SERIAL PRIMARY KEY,
+    Name VARCHAR(100) NOT NULL,
+    Address VARCHAR(200),
+    Phone VARCHAR(15),
+    Email VARCHAR(100) UNIQUE
+);
+
+-- Create Accounts Table
+CREATE TABLE Accounts (
+    Account_ID SERIAL PRIMARY KEY,
+    Customer_ID INTEGER REFERENCES Customers(Customer_ID),
+    Account_Type VARCHAR(50),
+    Balance NUMERIC DEFAULT 0,
+    Created_Date DATE DEFAULT CURRENT_DATE
+);
+
+-- Create Transactions Table
+CREATE TABLE Transactions (
+    Transaction_ID SERIAL PRIMARY KEY,
+    Account_ID INTEGER REFERENCES Accounts(Account_ID),
+    Transaction_Type VARCHAR(50),
+    Amount NUMERIC,
+    Transaction_Date DATE DEFAULT CURRENT_DATE,
+    Remarks VARCHAR(255)
+);
+
+--Create Account Function
+CREATE OR REPLACE FUNCTION create_account(
+    p_customer_id INTEGER,
+    p_account_type VARCHAR,
+    p_initial_deposit NUMERIC
+) RETURNS VOID AS $$
+BEGIN
+    INSERT INTO Accounts (Customer_ID, Account_Type, Balance)
+    VALUES (p_customer_id, p_account_type, p_initial_deposit);
+END;
+$$ LANGUAGE plpgsql;
+
+--Deposit Function
+CREATE OR REPLACE FUNCTION deposit(
+    p_account_id INTEGER,
+    p_amount NUMERIC
+) RETURNS VOID AS $$
+BEGIN
+    UPDATE Accounts
+    SET Balance = Balance + p_amount
+    WHERE Account_ID = p_account_id;
+
+    INSERT INTO Transactions (Account_ID, Transaction_Type, Amount, Remarks)
+    VALUES (p_account_id, 'Deposit', p_amount, 'Deposit Transaction');
+END;
+$$ LANGUAGE plpgsql;
+
+--Withdraw Function
+CREATE OR REPLACE FUNCTION withdraw(
+    p_account_id INTEGER,
+    p_amount NUMERIC
+) RETURNS VOID AS $$
+BEGIN
+    -- Check if sufficient balance exists
+    IF (SELECT Balance FROM Accounts WHERE Account_ID = p_account_id) < p_amount THEN
+        RAISE EXCEPTION 'Insufficient balance';
+    END IF;
+
+    UPDATE Accounts
+    SET Balance = Balance - p_amount
+    WHERE Account_ID = p_account_id;
+
+    INSERT INTO Transactions (Account_ID, Transaction_Type, Amount, Remarks)
+    VALUES (p_account_id, 'Withdrawal', p_amount, 'Withdrawal Transaction');
+END;
+$$ LANGUAGE plpgsql;
+
+--Transfer Function
+CREATE OR REPLACE FUNCTION transfer(
+    p_from_account_id INTEGER,
+    p_to_account_id INTEGER,
+    p_amount NUMERIC
+) RETURNS VOID AS $$
+BEGIN
+    -- Withdraw from source account
+    PERFORM withdraw(p_from_account_id, p_amount);
+
+    -- Deposit into destination account
+    PERFORM deposit(p_to_account_id, p_amount);
+
+    -- Record the transfer in the Transactions table
+    INSERT INTO Transactions (Account_ID, Transaction_Type, Amount, Remarks)
+    VALUES (p_from_account_id, 'Transfer', p_amount, 'Transferred to Account ' || p_to_account_id);
+    INSERT INTO Transactions (Account_ID, Transaction_Type, Amount, Remarks)
+    VALUES (p_to_account_id, 'Transfer', p_amount, 'Transferred from Account ' || p_from_account_id);
+END;
+$$ LANGUAGE plpgsql;
+
+--Check Balance Function
+CREATE OR REPLACE FUNCTION get_balance(
+    p_account_id INTEGER
+) RETURNS NUMERIC AS $$
+DECLARE
+    v_balance NUMERIC;
+BEGIN
+    SELECT Balance INTO v_balance FROM Accounts WHERE Account_ID = p_account_id;
+    RETURN v_balance;
+END;
+$$ LANGUAGE plpgsql;
+
+
+-- Triggers
+CREATE OR REPLACE FUNCTION check_balance_before_withdrawal() 
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.Balance < 0 THEN
+        RAISE EXCEPTION 'Insufficient balance for withdrawal';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER check_balance_before_withdrawal
+BEFORE UPDATE ON Accounts
+FOR EACH ROW
+EXECUTE FUNCTION check_balance_before_withdrawal();
+
+
+
+
+
+-- Example Usage
+--Creating Customers
+INSERT INTO Customers (Name, Address, Phone, Email)
+VALUES ('Shubham Kumar Raj', '7B Main St', '8090099989', 'skr@example.com');
+INSERT INTO Customers (Name, Address, Phone, Email)
+VALUES 
+('salman','mumbai street','6567588697','slman@example.com'),
+('akshay','mohali','789977578','aki@example.com');
+SELECT * FROM Customers;
+
+
+
+--Creating Accounts
+SELECT create_account(1, 'Savings', 10000);
+SELECT * FROM Accounts;
+
+
+
+
+--Deposit
+SELECT deposit(1, 5000);  -- Deposit 5000 to Account with ID 1
+SELECT * FROM Accounts;
+
+SELECT * FROM Transactions;
+
+--Withdraw
+SELECT withdraw(1, 2000);  -- Withdraw 2000 from Account with ID 1
+SELECT * FROM Accounts;
+SELECT * FROM Transactions;
+
+--Transfer
+SELECT transfer(1, 2, 1000);  -- Transfer 1000 from Account 1 to Account 2
+SELECT * FROM Transactions;
+SELECT * FROM Accounts;
+-----------------------------------------------------------------------------------------------------------------------------
+python code for GUI
+import tkinter as tk
+from tkinter import messagebox
+import psycopg2
+from psycopg2 import sql
+
+# Connect to PostgreSQL database
+def get_db_connection():
+    return psycopg2.connect(
+        host="localhost",
+        database="postgres",
+        user="postgres",
+        password="Shubhji@1234"
+    )
+
+def add_customer():
+    name = entry_name.get()
+    address = entry_address.get()
+    phone = entry_phone.get()
+    email = entry_email.get()
+
+    if not name or not address or not phone or not email:
+        messagebox.showerror("Error", "All fields are required.")
+        return
+
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO Customers (Name, Address, Phone, Email) VALUES (%s, %s, %s, %s)",
+                    (name, address, phone, email)
+                )
+                conn.commit()
+                messagebox.showinfo("Success", "Customer added successfully")
+    except Exception as e:
+        messagebox.showerror("Error", f"Error adding customer: {str(e)}")
+
+def create_account():
+    customer_id = entry_customer_id.get()
+    account_type = entry_account_type.get()
+    initial_deposit = entry_initial_deposit.get()
+
+    if not customer_id or not account_type or not initial_deposit:
+        messagebox.showerror("Error", "All fields are required.")
+        return
+
+    try:
+        initial_deposit = float(initial_deposit)  # Ensure it's a float
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT create_account(%s, %s, %s)", (customer_id, account_type, initial_deposit))
+                conn.commit()
+                messagebox.showinfo("Success", "Account created successfully")
+    except Exception as e:
+        messagebox.showerror("Error", f"Error creating account: {str(e)}")
+
+def deposit():
+    account_id = entry_account_id.get()
+    amount = entry_amount.get()
+
+    if not account_id or not amount:
+        messagebox.showerror("Error", "All fields are required.")
+        return
+
+    try:
+        amount = float(amount)  # Ensure it's a float
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT deposit(%s, %s)", (account_id, amount))
+                conn.commit()
+                messagebox.showinfo("Success", "Deposit successful")
+    except Exception as e:
+        messagebox.showerror("Error", f"Error during deposit: {str(e)}")
+
+def withdraw():
+    account_id = entry_account_id.get()
+    amount = entry_amount.get()
+
+    if not account_id or not amount:
+        messagebox.showerror("Error", "All fields are required.")
+        return
+
+    try:
+        amount = float(amount)  # Ensure it's a float
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT withdraw(%s, %s)", (account_id, amount))
+                conn.commit()
+                messagebox.showinfo("Success", "Withdrawal successful")
+    except Exception as e:
+        messagebox.showerror("Error", f"Error during withdrawal: {str(e)}")
+
+def transfer():
+    from_account_id = entry_from_account_id.get()
+    to_account_id = entry_to_account_id.get()
+    amount = entry_transfer_amount.get()
+
+    if not from_account_id or not to_account_id or not amount:
+        messagebox.showerror("Error", "All fields are required.")
+        return
+
+    try:
+        amount = float(amount)  # Ensure it's a float
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT transfer(%s, %s, %s)", (from_account_id, to_account_id, amount))
+                conn.commit()
+                messagebox.showinfo("Success", "Transfer successful")
+    except Exception as e:
+        messagebox.showerror("Error", f"Error during transfer: {str(e)}")
+
+def view_balance():
+    account_id = entry_account_id.get()
+
+    if not account_id:
+        messagebox.showerror("Error", "Account ID is required.")
+        return
+
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT get_balance(%s)", (account_id,))
+                balance = cur.fetchone()[0]
+                messagebox.showinfo("Account Balance", f"Balance: {balance}")
+    except Exception as e:
+        messagebox.showerror("Error", f"Error fetching balance: {str(e)}")
+
+def view_transactions():
+    account_id = entry_account_id.get()
+
+    if not account_id:
+        messagebox.showerror("Error", "Account ID is required.")
+        return
+
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM Transactions WHERE Account_ID = %s", (account_id,))
+                transactions = cur.fetchall()
+                transaction_text.delete(1.0, tk.END)
+                for trans in transactions:
+                    transaction_text.insert(tk.END, f"{trans}\n")
+    except Exception as e:
+        messagebox.showerror("Error", f"Error fetching transactions: {str(e)}")
+
+# Set up Tkinter window
+root = tk.Tk()
+root.title("Bank Management System")
+
+# Add Customer Frame
+frame_customer = tk.Frame(root)
+frame_customer.pack(pady=10)
+
+tk.Label(frame_customer, text="Add Customer").grid(row=0, column=0, columnspan=2)
+tk.Label(frame_customer, text="Name").grid(row=1, column=0)
+entry_name = tk.Entry(frame_customer)
+entry_name.grid(row=1, column=1)
+
+tk.Label(frame_customer, text="Address").grid(row=2, column=0)
+entry_address = tk.Entry(frame_customer)
+entry_address.grid(row=2, column=1)
+
+tk.Label(frame_customer, text="Phone").grid(row=3, column=0)
+entry_phone = tk.Entry(frame_customer)
+entry_phone.grid(row=3, column=1)
+
+tk.Label(frame_customer, text="Email").grid(row=4, column=0)
+entry_email = tk.Entry(frame_customer)
+entry_email.grid(row=4, column=1)
+
+btn_add_customer = tk.Button(frame_customer, text="Add Customer", command=add_customer)
+btn_add_customer.grid(row=5, column=0, columnspan=2)
+
+# Create Account Frame
+frame_account = tk.Frame(root)
+frame_account.pack(pady=10)
+
+tk.Label(frame_account, text="Create Account").grid(row=0, column=0, columnspan=2)
+tk.Label(frame_account, text="Customer ID").grid(row=1, column=0)
+entry_customer_id = tk.Entry(frame_account)
+entry_customer_id.grid(row=1, column=1)
+
+tk.Label(frame_account, text="Account Type").grid(row=2, column=0)
+entry_account_type = tk.Entry(frame_account)
+entry_account_type.grid(row=2, column=1)
+
+tk.Label(frame_account, text="Initial Deposit").grid(row=3, column=0)
+entry_initial_deposit = tk.Entry(frame_account)
+entry_initial_deposit.grid(row=3, column=1)
+
+btn_create_account = tk.Button(frame_account, text="Create Account", command=create_account)
+btn_create_account.grid(row=4, column=0, columnspan=2)
+
+# Transaction Frame
+frame_transaction = tk.Frame(root)
+frame_transaction.pack(pady=10)
+
+tk.Label(frame_transaction, text="Account ID").grid(row=0, column=0)
+entry_account_id = tk.Entry(frame_transaction)
+entry_account_id.grid(row=0, column=1)
+
+tk.Label(frame_transaction, text="Amount").grid(row=1, column=0)
+entry_amount = tk.Entry(frame_transaction)
+entry_amount.grid(row=1, column=1)
+
+btn_deposit = tk.Button(frame_transaction, text="Deposit", command=deposit)
+btn_deposit.grid(row=2, column=0)
+
+btn_withdraw = tk.Button(frame_transaction, text="Withdraw", command=withdraw)
+btn_withdraw.grid(row=2, column=1)
+
+btn_view_balance = tk.Button(frame_transaction, text="View Balance", command=view_balance)
+btn_view_balance.grid(row=3, column=0, columnspan=2)
+
+# Transfer Frame
+frame_transfer = tk.Frame(root)
+frame_transfer.pack(pady=10)
+
+tk.Label(frame_transfer, text="From Account ID").grid(row=0, column=0)
+entry_from_account_id = tk.Entry(frame_transfer)
+entry_from_account_id.grid(row=0, column=1)
+
+tk.Label(frame_transfer, text="To Account ID").grid(row=1, column=0)
+entry_to_account_id = tk.Entry(frame_transfer)
+entry_to_account_id.grid(row=1, column=1)
+
+tk.Label(frame_transfer, text="Amount").grid(row=2, column=0)
+entry_transfer_amount = tk.Entry(frame_transfer)
+entry_transfer_amount.grid(row=2, column=1)
+
+btn_transfer = tk.Button(frame_transfer, text="Transfer", command=transfer)
+btn_transfer.grid(row=3, column=0, columnspan=2)
+
+# Transaction History
+frame_transactions = tk.Frame(root)
+frame_transactions.pack(pady=10)
+
+btn_view_transactions = tk.Button(frame_transactions, text="View Transactions", command=view_transactions)
+btn_view_transactions.grid(row=0, column=0)
+
+transaction_text = tk.Text(frame_transactions, width=50, height=10)
+transaction_text.grid(row=1, column=0)
+
+root.mainloop()
